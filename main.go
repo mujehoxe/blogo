@@ -472,9 +472,23 @@ func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	tagsJSON, err := json.Marshal(blog.Tags)
+	if err != nil {
+		writeErrorResponse(w, http.StatusInternalServerError, "Failed to process tags")
+		return
+	}
+
 	// Use transaction for database operation
 	err = withTransaction(func(tx *sql.Tx) error {
-		result, err := tx.Exec(`INSERT INTO blog_posts ...`)
+		result, err := tx.Exec(`
+        INSERT INTO blog_posts (
+            title, meta_description, focus_keyword, url_keyword,
+            image, tags, topic, service, industry, priority, description
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			blog.Title, blog.MetaDescription, blog.FocusKeyword, blog.UrlKeyword,
+			blog.Image, string(tagsJSON), blog.Topic, blog.Service, blog.Industry,
+			blog.Priority, blog.Description,
+		)
 		if err != nil {
 			return err
 		}
@@ -486,6 +500,7 @@ func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 		if blog.Image != "" {
 			os.Remove(blog.Image) // Cleanup uploaded file on DB failure
 		}
+		fmt.Println(err)
 		writeErrorResponse(w, http.StatusInternalServerError, "Failed to create blog post")
 		return
 	}
