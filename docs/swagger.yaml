@@ -1,0 +1,243 @@
+basePath: /
+definitions:
+  main.BlogPost:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      focus_keyword:
+        type: string
+      id:
+        type: integer
+      image:
+        type: string
+      industry:
+        type: string
+      meta_description:
+        type: string
+      priority:
+        enum:
+        - maximum
+        - high
+        - normal
+        type: string
+      service:
+        type: string
+      tags:
+        type: string
+      title:
+        type: string
+      topic:
+        type: string
+      updated_at:
+        type: string
+      url_keyword:
+        type: string
+    type: object
+  main.PaginatedResponse:
+    properties:
+      page:
+        description: Current page number
+        type: integer
+      pageSize:
+        description: Number of items per page
+        type: integer
+      posts:
+        description: List of blog posts
+        items:
+          $ref: '#/definitions/main.BlogPost'
+        type: array
+      totalPages:
+        description: Total number of pages
+        type: integer
+      totalPosts:
+        description: Total number of blog posts
+        type: integer
+    type: object
+  main.Sitemap:
+    properties:
+      urls:
+        description: List of URLs in the sitemap
+        items:
+          $ref: '#/definitions/main.URL'
+        type: array
+    type: object
+  main.URL:
+    properties:
+      changefreq:
+        description: The change frequency of the URL
+        type: string
+      loc:
+        description: The URL of the blog post
+        type: string
+      priority:
+        description: The priority of the URL in the sitemap
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: API for managing blog posts.
+  title: Blog API
+  version: "1.0"
+paths:
+  /blog:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Create a new blog post with metadata and an optional image upload
+      parameters:
+      - description: Title
+        in: formData
+        name: title
+        required: true
+        type: string
+      - description: Meta Description
+        in: formData
+        name: meta_description
+        type: string
+      - description: Focus Keyword
+        in: formData
+        name: focus_keyword
+        type: string
+      - description: URL Keyword
+        in: formData
+        name: url_keyword
+        required: true
+        type: string
+      - description: Tags
+        in: formData
+        name: tags
+        type: string
+      - description: Topic
+        in: formData
+        name: topic
+        type: string
+      - description: Service
+        in: formData
+        name: service
+        type: string
+      - description: Industry
+        in: formData
+        name: industry
+        type: string
+      - description: Priority
+        in: formData
+        name: priority
+        type: string
+      - description: Description
+        in: formData
+        name: description
+        required: true
+        type: string
+      - description: Image file (optional)
+        in: formData
+        name: image
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new blog post
+      tags:
+      - blogs
+  /blog/{urlKeyword}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a blog post by its URL keyword
+      parameters:
+      - description: URL Keyword of the blog post
+        in: path
+        name: urlKeyword
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.BlogPost'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a blog post
+      tags:
+      - blogs
+  /blogs:
+    get:
+      consumes:
+      - application/json
+      description: Get a paginated list of blog posts
+      parameters:
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Number of items per page
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.PaginatedResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List blog posts
+      tags:
+      - blogs
+  /sitemap.xml:
+    get:
+      description: Generate an XML sitemap of blog posts
+      produces:
+      - text/xml
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.Sitemap'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Generate sitemap.xml
+      tags:
+      - sitemap
+swagger: "2.0"
