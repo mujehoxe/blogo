@@ -25,7 +25,9 @@ definitions:
       service:
         type: string
       tags:
-        type: string
+        items:
+          type: string
+        type: array
       title:
         type: string
       topic:
@@ -75,7 +77,6 @@ definitions:
         description: The priority of the URL in the sitemap
         type: string
     type: object
-host: localhost:8080
 info:
   contact: {}
   description: API for managing blog posts.
@@ -106,10 +107,10 @@ paths:
         name: url_keyword
         required: true
         type: string
-      - description: Tags
+      - description: Tags (comma-separated values or multiple fields)
         in: formData
         name: tags
-        type: string
+        type: array
       - description: Topic
         in: formData
         name: topic

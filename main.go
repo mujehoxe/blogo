@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
@@ -20,26 +21,25 @@ import (
 // @title Blog API
 // @version 1.0
 // @description API for managing blog posts.
-// @host localhost:8080
 // @BasePath /
 
 // BlogPost represents a blog post with metadata
 // @swagger:model
 type BlogPost struct {
-	ID              int64  `json:"id"`
-	Title           string `json:"title"`
-	MetaDescription string `json:"meta_description"`
-	FocusKeyword    string `json:"focus_keyword"`
-	UrlKeyword      string `json:"url_keyword"`
-	Image           string `json:"image"`
-	Tags            string `json:"tags"`
-	Topic           string `json:"topic"`
-	Service         string `json:"service"`
-	Industry        string `json:"industry"`
-	Priority        string `json:"priority" enums:"maximum,high,normal"`
-	Description     string `json:"description"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	ID              int64    `json:"id"`
+	Title           string   `json:"title"`
+	MetaDescription string   `json:"meta_description"`
+	FocusKeyword    string   `json:"focus_keyword"`
+	UrlKeyword      string   `json:"url_keyword"`
+	Image           string   `json:"image"`
+	Tags            []string `json:"tags"`
+	Topic           string   `json:"topic"`
+	Service         string   `json:"service"`
+	Industry        string   `json:"industry"`
+	Priority        string   `json:"priority" enums:"maximum,high,normal"`
+	Description     string   `json:"description"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
 }
 
 // SEOData represents SEO metadata for a blog post
@@ -106,7 +106,6 @@ type PaginatedResponse struct {
 }
 
 var db *sql.DB
-var domain string
 
 var PriorityWeight = map[string]int{
 	"maximum": 3,
@@ -117,11 +116,6 @@ var PriorityWeight = map[string]int{
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️ Warning: No .env file found. Using default values if available.")
-	}
-
-	domain = os.Getenv("BASE_URL")
-	if domain == "" {
-		log.Fatal("❌ BASE_URL is not set in the environment variables or .env file")
 	}
 
 	// Initialize SQLite database
@@ -220,13 +214,23 @@ func listBlogsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var posts []BlogPost
 	for rows.Next() {
+		var tagsJSON string
 		var post BlogPost
 		err := rows.Scan(
 			&post.ID, &post.Title, &post.MetaDescription, &post.FocusKeyword,
-			&post.UrlKeyword, &post.Image, &post.Tags, &post.Topic,
+			&post.UrlKeyword, &post.Image, &tagsJSON, &post.Topic,
 			&post.Service, &post.Industry, &post.Priority, &post.Description,
 			&post.CreatedAt, &post.UpdatedAt,
 		)
+		// Unmarshal the tags JSON if it's not empty
+		if tagsJSON != "" {
+			if err := json.Unmarshal([]byte(tagsJSON), &post.Tags); err != nil {
+				fmt.Println("Error unmarshaling tags:", err)
+				http.Error(w, "Error unmarshaling tags", http.StatusInternalServerError)
+				post.Tags = []string{}
+			}
+		}
+
 		if err != nil {
 			continue
 		}
@@ -261,6 +265,8 @@ func listBlogsHandler(w http.ResponseWriter, r *http.Request) {
 func blogHandler(w http.ResponseWriter, r *http.Request) {
 	urlKeyword := r.URL.Path[len("/blog/"):]
 
+	var tagsJSON string
+
 	var blog BlogPost
 	err := db.QueryRow(`
 		SELECT id, title, meta_description, focus_keyword, url_keyword,
@@ -268,7 +274,7 @@ func blogHandler(w http.ResponseWriter, r *http.Request) {
 		  created_at, updated_at
 		FROM blog_posts WHERE url_keyword = ?`, urlKeyword).Scan(
 		&blog.ID, &blog.Title, &blog.MetaDescription, &blog.FocusKeyword,
-		&blog.UrlKeyword, &blog.Image, &blog.Tags, &blog.Topic,
+		&blog.UrlKeyword, &blog.Image, &tagsJSON, &blog.Topic,
 		&blog.Service, &blog.Industry, &blog.Priority, &blog.Description,
 		&blog.CreatedAt, &blog.UpdatedAt,
 	)
@@ -277,11 +283,21 @@ func blogHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Blog post not found", http.StatusNotFound)
 		return
 	} else if err != nil {
+		fmt.Println(err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
-	blogURL := domain + "/blog/" + blog.UrlKeyword
+	// Unmarshal the tags JSON if it's not empty
+	if tagsJSON != "" {
+		if err := json.Unmarshal([]byte(tagsJSON), &blog.Tags); err != nil {
+			fmt.Println("Error unmarshaling tags:", err)
+			http.Error(w, "Error unmarshaling tags", http.StatusInternalServerError)
+			blog.Tags = []string{}
+		}
+	}
+
+	blogURL := "/blog/" + blog.UrlKeyword
 
 	seoData := SEOData{
 		Context:  "https://schema.org",
@@ -328,7 +344,7 @@ func sitemapHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		urls = append(urls, URL{
-			Loc:      domain + "/blog/" + urlKeyword,
+			Loc:      "/blog/" + urlKeyword,
 			Change:   "weekly",
 			Priority: priority,
 		})
@@ -339,32 +355,27 @@ func sitemapHandler(w http.ResponseWriter, r *http.Request) {
 	xml.NewEncoder(w).Encode(sitemap)
 }
 
-// createBlogHandler creates a new blog post with image upload
-// @Summary Create a new blog post
-// @Description Create a new blog post with metadata and an optional image upload
-// @Tags blogs
-// @Accept multipart/form-data
-// @Produce json
-// @Param title formData string true "Title"
-// @Param meta_description formData string false "Meta Description"
-// @Param focus_keyword formData string false "Focus Keyword"
-// @Param url_keyword formData string true "URL Keyword"
-// @Param tags formData string false "Tags"
-// @Param topic formData string false "Topic"
-// @Param service formData string false "Service"
-// @Param industry formData string false "Industry"
-// @Param priority formData string false "Priority"
-// @Param description formData string true "Description"
-// @Param image formData file false "Image file (optional)"
-// @Success 201 {object} map[string]interface{}
-// @Failure 400 {object} map[string]string
-// @Failure 500 {object} map[string]string
-// @Router /blog [post]
 func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(10 << 20) // Limit file size to 10MB
 	if err != nil {
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
+	}
+
+	// Extract and process tags
+	var tags []string
+	if rawTags := r.Form["tags"]; len(rawTags) > 0 {
+		// Handle both comma-separated single field and multiple fields
+		for _, tagField := range rawTags {
+			// Split by comma and trim spaces
+			splitTags := strings.Split(tagField, ",")
+			for _, tag := range splitTags {
+				trimmedTag := strings.TrimSpace(tag)
+				if trimmedTag != "" {
+					tags = append(tags, trimmedTag)
+				}
+			}
+		}
 	}
 
 	// Extract form values
@@ -373,7 +384,7 @@ func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 		MetaDescription: r.FormValue("meta_description"),
 		FocusKeyword:    r.FormValue("focus_keyword"),
 		UrlKeyword:      r.FormValue("url_keyword"),
-		Tags:            r.FormValue("tags"),
+		Tags:            tags, // Use processed tags
 		Topic:           r.FormValue("topic"),
 		Service:         r.FormValue("service"),
 		Industry:        r.FormValue("industry"),
@@ -386,17 +397,22 @@ func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Serialize tags into a JSON array string
+	tagsJSON, err := json.Marshal(blog.Tags)
+	if err != nil {
+		http.Error(w, "Failed to serialize tags", http.StatusInternalServerError)
+		return
+	}
+
 	// Handle image upload
 	file, header, err := r.FormFile("image")
 	if err == nil { // File exists
 		defer file.Close()
-
 		// Ensure uploads directory exists
 		uploadDir := "./uploads"
 		if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
 			os.Mkdir(uploadDir, os.ModePerm)
 		}
-
 		// Save file
 		filePath := uploadDir + "/" + header.Filename
 		dst, err := os.Create(filePath)
@@ -405,13 +421,11 @@ func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer dst.Close()
-
 		_, err = dst.ReadFrom(file)
 		if err != nil {
 			http.Error(w, "Failed to write image file", http.StatusInternalServerError)
 			return
 		}
-
 		blog.Image = filePath // Save image path
 	}
 
@@ -422,10 +436,9 @@ func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 			image, tags, topic, service, industry, priority, description
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		blog.Title, blog.MetaDescription, blog.FocusKeyword, blog.UrlKeyword,
-		blog.Image, blog.Tags, blog.Topic, blog.Service, blog.Industry,
+		blog.Image, string(tagsJSON), blog.Topic, blog.Service, blog.Industry,
 		blog.Priority, blog.Description,
 	)
-
 	if err != nil {
 		fmt.Print(err)
 		http.Error(w, "Failed to create blog post", http.StatusInternalServerError)
@@ -439,8 +452,9 @@ func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Blog post created successfully",
-		"url":     domain + "/blog/" + blog.UrlKeyword,
+		"url":     "/blog/" + blog.UrlKeyword,
 		"id":      id,
 		"image":   blog.Image,
+		"tags":    blog.Tags, // Include processed tags in response
 	})
 }

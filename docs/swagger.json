@@ -6,7 +6,6 @@
         "contact": {},
         "version": "1.0"
     },
-    "host": "localhost:8080",
     "basePath": "/",
     "paths": {
         "/blog": {
@@ -50,8 +49,8 @@
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Tags",
+                        "type": "array",
+                        "description": "Tags (comma-separated values or multiple fields)",
                         "name": "tags",
                         "in": "formData"
                     },
@@ -285,7 +284,10 @@
                     "type": "string"
                 },
                 "tags": {
-                    "type": "string"
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "title": {
                     "type": "string"

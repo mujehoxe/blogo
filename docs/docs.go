@@ -56,8 +56,8 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Tags",
+                        "type": "array",
+                        "description": "Tags (comma-separated values or multiple fields)",
                         "name": "tags",
                         "in": "formData"
                     },
@@ -291,7 +291,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tags": {
-                    "type": "string"
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "title": {
                     "type": "string"
@@ -370,7 +373,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Blog API",
