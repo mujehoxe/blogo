@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -106,6 +110,76 @@ type PaginatedResponse struct {
 }
 
 var db *sql.DB
+
+// Add connection health check
+func checkDBConnection() error {
+	return db.Ping()
+}
+
+// Add transaction wrapper
+func withTransaction(fn func(*sql.Tx) error) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p)
+		}
+	}()
+	if err := fn(tx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	return json.NewEncoder(w).Encode(data)
+}
+
+func writeErrorResponse(w http.ResponseWriter, status int, message string) error {
+	return writeJSONResponse(w, status, map[string]string{"error": message})
+}
+
+const (
+	maxFileSize       = 10 << 20 // 10MB
+	allowedImageTypes = "image/jpeg,image/png,image/gif"
+)
+
+func validateAndSaveFile(file multipart.File, header *multipart.FileHeader) (string, error) {
+	// Check file size
+	if header.Size > maxFileSize {
+		return "", fmt.Errorf("file size exceeds maximum allowed size")
+	}
+
+	// Check file type
+	contentType := header.Header.Get("Content-Type")
+	if !strings.Contains(allowedImageTypes, contentType) {
+		return "", fmt.Errorf("unsupported file type: %s", contentType)
+	}
+
+	// Create safe filename
+	filename := filepath.Clean(header.Filename)
+	filepath := filepath.Join("uploads", filename)
+
+	// Save file with proper permissions
+	dst, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		os.Remove(filepath) // Cleanup on failure
+		return "", err
+	}
+
+	return filepath, nil
+}
 
 var PriorityWeight = map[string]int{
 	"maximum": 3,
@@ -356,105 +430,140 @@ func sitemapHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func createBlogHandler(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseMultipartForm(10 << 20) // Limit file size to 10MB
-	if err != nil {
-		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+	if err := r.ParseMultipartForm(maxFileSize); err != nil {
+		writeErrorResponse(w, http.StatusBadRequest, "Failed to parse form data")
 		return
 	}
 
-	// Extract and process tags
+	blog, err := validateBlogPost(r)
+	if err != nil {
+		writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Handle file upload
+	if file, header, err := r.FormFile("image"); err == nil {
+		if filepath, err := validateAndSaveFile(file, header); err != nil {
+			writeErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("Invalid file: %v", err))
+			return
+		} else {
+			blog.Image = filepath
+		}
+	}
+
+	// Use transaction for database operation
+	err = withTransaction(func(tx *sql.Tx) error {
+		result, err := tx.Exec(`INSERT INTO blog_posts ...`)
+		if err != nil {
+			return err
+		}
+		blog.ID, err = result.LastInsertId()
+		return err
+	})
+
+	if err != nil {
+		if blog.Image != "" {
+			os.Remove(blog.Image) // Cleanup uploaded file on DB failure
+		}
+		writeErrorResponse(w, http.StatusInternalServerError, "Failed to create blog post")
+		return
+	}
+
+	if err := writeJSONResponse(w, http.StatusCreated, map[string]interface{}{
+		"message": "Blog post created successfully",
+		"url":     "/blog/" + blog.UrlKeyword,
+		"id":      blog.ID,
+		"image":   blog.Image,
+		"tags":    blog.Tags,
+	}); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
+}
+
+func validateBlogPost(r *http.Request) (BlogPost, error) {
+	var blog BlogPost
+
+	// Required field validation
+	blog.Title = strings.TrimSpace(r.FormValue("title"))
+	if blog.Title == "" {
+		return blog, fmt.Errorf("title is required")
+	}
+
+	blog.Description = strings.TrimSpace(r.FormValue("description"))
+	if blog.Description == "" {
+		return blog, fmt.Errorf("description is required")
+	}
+
+	blog.UrlKeyword = strings.TrimSpace(r.FormValue("url_keyword"))
+	if blog.UrlKeyword == "" {
+		return blog, fmt.Errorf("url_keyword is required")
+	}
+
+	// Validate URL keyword format (alphanumeric with hyphens)
+	if !regexp.MustCompile(`^[a-zA-Z0-9-]+$`).MatchString(blog.UrlKeyword) {
+		return blog, fmt.Errorf("url_keyword must contain only letters, numbers, and hyphens")
+	}
+
+	// Validate priority
+	blog.Priority = strings.TrimSpace(r.FormValue("priority"))
+	if blog.Priority != "" {
+		validPriorities := map[string]bool{
+			"maximum": true,
+			"high":    true,
+			"normal":  true,
+		}
+		if !validPriorities[blog.Priority] {
+			return blog, fmt.Errorf("invalid priority value: must be maximum, high, or normal")
+		}
+	} else {
+		blog.Priority = "normal" // Default priority
+	}
+
+	// Process and validate tags
 	var tags []string
 	if rawTags := r.Form["tags"]; len(rawTags) > 0 {
-		// Handle both comma-separated single field and multiple fields
 		for _, tagField := range rawTags {
-			// Split by comma and trim spaces
 			splitTags := strings.Split(tagField, ",")
 			for _, tag := range splitTags {
-				trimmedTag := strings.TrimSpace(tag)
-				if trimmedTag != "" {
-					tags = append(tags, trimmedTag)
+				tag = strings.TrimSpace(tag)
+				if tag != "" {
+					// Optional: Add more specific tag validation here
+					// e.g., length limits, character restrictions
+					if len(tag) > 50 {
+						return blog, fmt.Errorf("tag length cannot exceed 50 characters: %s", tag)
+					}
+					tags = append(tags, tag)
 				}
 			}
 		}
 	}
+	blog.Tags = tags
 
-	// Extract form values
-	blog := BlogPost{
-		Title:           r.FormValue("title"),
-		MetaDescription: r.FormValue("meta_description"),
-		FocusKeyword:    r.FormValue("focus_keyword"),
-		UrlKeyword:      r.FormValue("url_keyword"),
-		Tags:            tags, // Use processed tags
-		Topic:           r.FormValue("topic"),
-		Service:         r.FormValue("service"),
-		Industry:        r.FormValue("industry"),
-		Priority:        r.FormValue("priority"),
-		Description:     r.FormValue("description"),
+	// Optional fields
+	blog.MetaDescription = strings.TrimSpace(r.FormValue("meta_description"))
+	blog.FocusKeyword = strings.TrimSpace(r.FormValue("focus_keyword"))
+	blog.Topic = strings.TrimSpace(r.FormValue("topic"))
+	blog.Service = strings.TrimSpace(r.FormValue("service"))
+	blog.Industry = strings.TrimSpace(r.FormValue("industry"))
+
+	// Optional field validations
+	if len(blog.MetaDescription) > 160 {
+		return blog, fmt.Errorf("meta description cannot exceed 160 characters")
 	}
 
-	if blog.UrlKeyword == "" || blog.Title == "" || blog.Description == "" {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
-		return
+	if len(blog.Title) > 100 {
+		return blog, fmt.Errorf("title cannot exceed 100 characters")
 	}
 
-	// Serialize tags into a JSON array string
-	tagsJSON, err := json.Marshal(blog.Tags)
+	// Check for duplicate URL keyword
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM blog_posts WHERE url_keyword = ?)", blog.UrlKeyword).Scan(&exists)
 	if err != nil {
-		http.Error(w, "Failed to serialize tags", http.StatusInternalServerError)
-		return
+		return blog, fmt.Errorf("failed to check URL keyword uniqueness: %v", err)
+	}
+	if exists {
+		return blog, fmt.Errorf("url_keyword already exists")
 	}
 
-	// Handle image upload
-	file, header, err := r.FormFile("image")
-	if err == nil { // File exists
-		defer file.Close()
-		// Ensure uploads directory exists
-		uploadDir := "./uploads"
-		if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
-			os.Mkdir(uploadDir, os.ModePerm)
-		}
-		// Save file
-		filePath := uploadDir + "/" + header.Filename
-		dst, err := os.Create(filePath)
-		if err != nil {
-			http.Error(w, "Failed to save image", http.StatusInternalServerError)
-			return
-		}
-		defer dst.Close()
-		_, err = dst.ReadFrom(file)
-		if err != nil {
-			http.Error(w, "Failed to write image file", http.StatusInternalServerError)
-			return
-		}
-		blog.Image = filePath // Save image path
-	}
-
-	// Insert into database
-	result, err := db.Exec(`
-		INSERT INTO blog_posts (
-			title, meta_description, focus_keyword, url_keyword,
-			image, tags, topic, service, industry, priority, description
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		blog.Title, blog.MetaDescription, blog.FocusKeyword, blog.UrlKeyword,
-		blog.Image, string(tagsJSON), blog.Topic, blog.Service, blog.Industry,
-		blog.Priority, blog.Description,
-	)
-	if err != nil {
-		fmt.Print(err)
-		http.Error(w, "Failed to create blog post", http.StatusInternalServerError)
-		return
-	}
-
-	id, _ := result.LastInsertId()
-	blog.ID = id
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Blog post created successfully",
-		"url":     "/blog/" + blog.UrlKeyword,
-		"id":      id,
-		"image":   blog.Image,
-		"tags":    blog.Tags, // Include processed tags in response
-	})
+	return blog, nil
 }
