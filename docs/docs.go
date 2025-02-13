@@ -15,6 +15,119 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/blog": {
+            "post": {
+                "description": "Create a new blog post with metadata and an optional image upload",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blogs"
+                ],
+                "summary": "Create a new blog post",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Title",
+                        "name": "title",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Meta Description",
+                        "name": "meta_description",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Focus Keyword",
+                        "name": "focus_keyword",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "URL Keyword",
+                        "name": "url_keyword",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "array",
+                        "description": "Tags (comma-separated values or multiple fields)",
+                        "name": "tags",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Topic",
+                        "name": "topic",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Service",
+                        "name": "service",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Industry",
+                        "name": "industry",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Priority",
+                        "name": "priority",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Description",
+                        "name": "description",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Image file (optional)",
+                        "name": "image",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/blog/{urlKeyword}": {
             "get": {
                 "description": "Retrieve a blog post by its URL keyword",
