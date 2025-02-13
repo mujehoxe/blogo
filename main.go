@@ -429,6 +429,27 @@ func sitemapHandler(w http.ResponseWriter, r *http.Request) {
 	xml.NewEncoder(w).Encode(sitemap)
 }
 
+// createBlogHandler creates a new blog post with image upload
+// @Summary Create a new blog post
+// @Description Create a new blog post with metadata and an optional image upload
+// @Tags blogs
+// @Accept multipart/form-data
+// @Produce json
+// @Param title formData string true "Title"
+// @Param meta_description formData string false "Meta Description"
+// @Param focus_keyword formData string false "Focus Keyword"
+// @Param url_keyword formData string true "URL Keyword"
+// @Param tags formData array false "Tags (comma-separated values or multiple fields)"
+// @Param topic formData string false "Topic"
+// @Param service formData string false "Service"
+// @Param industry formData string false "Industry"
+// @Param priority formData string false "Priority"
+// @Param description formData string true "Description"
+// @Param image formData file false "Image file (optional)"
+// @Success 201 {object} map[string]interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /blog [post]
 func createBlogHandler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(maxFileSize); err != nil {
 		writeErrorResponse(w, http.StatusBadRequest, "Failed to parse form data")
