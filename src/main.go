@@ -182,6 +182,36 @@ var PriorityWeight = map[string]int{
 	"normal":  1,
 }
 
+// Create a handler wrapper for non-HandlerFunc handlers
+func wrapHandler(handler http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+	}
+}
+
+// CORS middleware to handle cross-origin requests
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+
+		// Set CORS headers
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️ Warning: No .env file found. Using default values if available.")
@@ -198,11 +228,14 @@ func main() {
 	// Create tables if they don't exist
 	createTables()
 
-	http.HandleFunc("/blog", createBlogHandler)
-	http.HandleFunc("/blog/", blogHandler)
-	http.HandleFunc("/blogs", listBlogsHandler)
-	http.HandleFunc("/sitemap.xml", sitemapHandler)
-	http.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+	// Apply CORS middleware to all routes
+	http.HandleFunc("/blog", corsMiddleware(createBlogHandler))
+	http.HandleFunc("/blog/", corsMiddleware(blogHandler))
+	http.HandleFunc("/blogs", corsMiddleware(listBlogsHandler))
+	http.HandleFunc("/sitemap.xml", corsMiddleware(sitemapHandler))
+
+	// For the swagger handler, we need to wrap it since it's an http.Handler
+	http.HandleFunc("/swagger/", corsMiddleware(wrapHandler(httpSwagger.WrapHandler)))
 
 	log.Println("🚀 Server running on port 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
