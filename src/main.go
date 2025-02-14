@@ -111,11 +111,6 @@ type PaginatedResponse struct {
 
 var db *sql.DB
 
-// Add connection health check
-func checkDBConnection() error {
-	return db.Ping()
-}
-
 // Add transaction wrapper
 func withTransaction(fn func(*sql.Tx) error) error {
 	tx, err := db.Begin()
