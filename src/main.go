@@ -208,6 +208,35 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func fileServerHandler(dir string) http.HandlerFunc {
+	// Create a file server handler for the uploads directory
+	fs := http.FileServer(http.Dir(dir))
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Remove "/uploads/" prefix from the URL path
+		urlPath := strings.TrimPrefix(r.URL.Path, "/uploads/")
+
+		// Security check: prevent directory traversal
+		if strings.Contains(urlPath, "..") {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+
+		// Clean the path
+		cleanPath := filepath.Clean(urlPath)
+
+		// Update the request URL path
+		r.URL.Path = cleanPath
+
+		// Set headers for image caching (optional)
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		w.Header().Set("Expires", "31536000")
+
+		// Serve the file
+		fs.ServeHTTP(w, r)
+	}
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️ Warning: No .env file found. Using default values if available.")
@@ -232,6 +261,8 @@ func main() {
 
 	// For the swagger handler, we need to wrap it since it's an http.Handler
 	http.HandleFunc("/swagger/", corsMiddleware(wrapHandler(httpSwagger.WrapHandler)))
+
+	http.HandleFunc("/uploads/", corsMiddleware(fileServerHandler("./uploads")))
 
 	log.Println("🚀 Server running on port 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
