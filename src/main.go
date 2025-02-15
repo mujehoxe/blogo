@@ -244,7 +244,7 @@ func main() {
 
 	// Initialize SQLite database
 	var err error
-	db, err = sql.Open("sqlite3", "./blog.db")
+	db, err = sql.Open("sqlite3", "../blog.db")
 	if err != nil {
 		log.Fatal("❌ Failed to open database:", err)
 	}
