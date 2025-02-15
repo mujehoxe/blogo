@@ -192,12 +192,8 @@ func wrapHandler(handler http.Handler) http.HandlerFunc {
 // CORS middleware to handle cross-origin requests
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
 
-		// Set CORS headers
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
